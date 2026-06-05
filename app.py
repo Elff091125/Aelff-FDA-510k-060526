@@ -548,30 +548,93 @@ with tab_feas:
 # -----------------------------------------------------------------------------
 # TAB 4: TFDA CHECKLIST GENERATOR
 # -----------------------------------------------------------------------------
+# =============================================================================
+# TAB 4: TFDA CHECKLIST GENERATOR (具備上傳、下載與 Session 記憶功能)
+# =============================================================================
 with tab_checklist:
     st.markdown(f"### 🔍 {t('tfda_checklist')}")
-    st.write("Construct structured Taiwan FDA technical checklist matrices.")
+    st.write("Construct, edit, import, and export structured Taiwan FDA technical checklist matrices.")
 
-    checklist_data = {
-        "Requirement Item": [
-            "1. Functional specifications and design characteristics",
-            "2. Biocompatibility assessment report",
-            "3. Software validation file conforming to IEC 62304",
-            "4. Human factors and usability engineering files",
-            "5. Sterilization testing parameters"
-        ],
-        "Compliance Status": ["Compliant", "Gap Detected", "Compliant", "Not Applicable", "Gap Detected"],
-        "Traceability Reference File": ["Doc-S-01", "Missing", "Doc-SW-88", "N/A", "Missing"]
-    }
-    df = pd.DataFrame(checklist_data)
-    edited_df = st.data_editor(df, num_rows="dynamic")
+    # 1. 初始化 Session State 表格資料 (避免切換 Tab 時編輯內容遺失)
+    if "tfda_checklist_df" not in st.session_state:
+        st.session_state.tfda_checklist_df = pd.DataFrame({
+            "Requirement Item": [
+                "1. Functional specifications and design characteristics (功能規格與設計特徵描述)",
+                "2. Biocompatibility assessment report (生物相容性評估報告)",
+                "3. Software validation file conforming to IEC 62304 (軟體生命週期驗證檔案)",
+                "4. Human factors and usability engineering files (人因與可用性工程評估報告)",
+                "5. Sterilization testing parameters & Validation (無菌與滅菌製程驗證)"
+            ],
+            "Compliance Status": ["Compliant", "Gap Detected", "Compliant", "Not Applicable", "Gap Detected"],
+            "Traceability Reference File": ["Doc-S-01", "Missing", "Doc-SW-88", "N/A", "Missing"]
+        })
 
-    if st.button("Synthesize Full Checklist Narrative"):
-        checklist_str = edited_df.to_string()
-        prompt = f"Create a comprehensive TFDA checklist synthesis report based on this matrix:\n{checklist_str}"
-        out = execute_llm_call(prompt, "You are an expert on TFDA regulations.")
-        st.session_state.reports_generated["checklist_report"] = out
+    # 2. 檔案上傳功能區塊
+    st.markdown("#### 📥 匯入現有的 Checklist 檔案")
+    uploaded_checklist = st.file_uploader(
+        "Upload edited checklist (CSV format)", 
+        type=["csv"], 
+        key="checklist_uploader"
+    )
+
+    if uploaded_checklist is not None:
+        try:
+            # 使用 utf-8 或 utf-8-sig 讀取，避免中文字元解析失敗
+            uploaded_df = pd.read_csv(uploaded_checklist, encoding="utf-8-sig")
+            
+            # 簡單驗證上傳的 CSV 欄位結構是否相符
+            required_cols = ["Requirement Item", "Compliance Status", "Traceability Reference File"]
+            if all(col in uploaded_df.columns for col in required_cols):
+                st.session_state.tfda_checklist_df = uploaded_df[required_cols]
+                add_log("Successfully imported a custom TFDA checklist via CSV upload.")
+                st.success("✅ 檔案匯入成功！下方表格已更新。")
+            else:
+                st.error("❌ 匯入失敗：上傳的 CSV 欄位名稱與範本不符，請確認欄位包含：'Requirement Item', 'Compliance Status', 'Traceability Reference File'")
+        except Exception as e:
+            st.error(f"❌ 讀取檔案時發生錯誤: {str(e)}")
+
+    st.markdown("---")
+
+    # 3. 互動式資料編輯器 (綁定 Session State)
+    st.markdown("#### 📝 編輯與確認 Checklist 內容")
+    
+    # 透過 data_editor 讓使用者自由新增、刪除或修改表格內容
+    edited_df = st.data_editor(
+        st.session_state.tfda_checklist_df, 
+        num_rows="dynamic", 
+        key="tfda_editor_instance"
+    )
+    
+    # 將編輯後的結果即時存回 Session State
+    st.session_state.tfda_checklist_df = edited_df
+
+    # 4. 檔案下載與控制項區塊
+    col_dl1, col_dl2 = st.columns(2)
+    
+    with col_dl1:
+        # 將最新的表格轉換為相容於 Excel 的 utf-8-sig 格式 CSV
+        csv_buffer = io.BytesIO()
+        edited_df.to_csv(csv_buffer, index=False, encoding="utf-8-sig")
+        csv_bytes = csv_buffer.getvalue()
         
+        st.download_button(
+            label="📤 匯出目前表格 (Download CSV)",
+            data=csv_bytes,
+            file_name="tfda_checklist_export.csv",
+            mime="text/csv",
+            key="download_checklist_btn"
+        )
+        st.caption("💡 註：此 CSV 檔案採用 UTF-8-SIG 編碼，可直接使用 Microsoft Excel 開啟，中文不會出現亂碼。")
+
+    with col_dl2:
+        if st.button("Synthesize Full Checklist Narrative"):
+            checklist_str = edited_df.to_string()
+            prompt = f"Create a comprehensive TFDA checklist synthesis report based on this matrix:\n{checklist_str}"
+            out = execute_llm_call(prompt, "You are an expert on TFDA regulations.")
+            st.session_state.reports_generated["checklist_report"] = out
+            st.rerun() # 重新渲染頁面以即時顯示報告
+
+    # 5. 渲染 AI 產生的技術報告
     if "checklist_report" in st.session_state.reports_generated:
         st.markdown("---")
         st.markdown(st.session_state.reports_generated["checklist_report"], unsafe_allow_html=True)
