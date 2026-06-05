@@ -214,43 +214,93 @@ def inject_custom_styles():
 # -----------------------------------------------------------------------------
 def execute_llm_call(prompt, system_instruction="", model="gemini-3.1-flash-lite"):
     """
-    In a real workspace, API keys would trigger actual endpoints.
-    In the absence of configured keys, this fallback engine simulates grounded, high-value regulatory drafting.
+    動態調用現代 LLM 介面。若無金鑰，則安全降級至法規模擬引擎。
     """
-    # Simulate API interaction delay and logging
     add_log(f"Initiated request to {model} with prompt length {len(prompt)} characters.")
     
-    # Check for actual keys and mock if missing
+    # 提取環境變數或 Session 中的 API Key
     gemini_key = os.environ.get("GEMINI_API_KEY") or st.session_state.get("gemini_key_val")
     openai_key = os.environ.get("OPENAI_API_KEY") or st.session_state.get("openai_key_val")
     
+    # === GEMINI 現代 SDK 呼叫流程 ===
     if "gemini" in model.lower() and gemini_key:
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            # Create a generative model setup
-            m = genai.GenerativeModel(model_name="gemini-1.5-flash", system_instruction=system_instruction)
-            response = m.generate_content(prompt)
-            add_log("Gemini API call succeeded.")
+            # 引入 2026 官方推薦的 google-genai 模組
+            from google import genai
+            from google.genai import types
+            
+            # 初始化 Client
+            client = genai.Client(api_key=gemini_key)
+            
+            # 動態取得 UI 選擇的模型名稱，避免寫死
+            target_model = model.strip()
+            
+            # 使用新版 GenerateContentConfig 設定 System Instruction 與思考深度
+            config_params = types.GenerateContentConfig(
+                system_instruction=system_instruction if system_instruction else None,
+                thinking_config=types.ThinkingConfig(thinking_budget=1024) if "3.5" in target_model else None
+            )
+            
+            response = client.models.generate_content(
+                model=target_model,
+                contents=prompt,
+                config=config_params
+            )
+            
+            add_log(f"Gemini API ({target_model}) call succeeded via google-genai SDK.")
             return response.text
+            
         except Exception as e:
-            add_log(f"Gemini API returned an error: {str(e)}. Falling back to deterministic simulation.")
+            add_log(f"Gemini API ({model}) returned an error: {str(e)}. Falling back to deterministic simulation.")
     
+    # === OPENAI 呼叫流程 ===
     elif "gpt" in model.lower() and openai_key:
         try:
             from openai import OpenAI
             client = OpenAI(api_key=openai_key)
+            
+            target_model = "gpt-4o-mini" if "mini" in model else model
+            
             completion = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=target_model,
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": prompt}
                 ]
             )
-            add_log("OpenAI API call succeeded.")
+            add_log(f"OpenAI API ({target_model}) call succeeded.")
             return completion.choices[0].message.content
         except Exception as e:
-            add_log(f"OpenAI API returned an error: {str(e)}. Falling back to deterministic simulation.")
+            add_log(f"OpenAI API ({model}) returned an error: {str(e)}. Falling back to deterministic simulation.")
+
+    # === 降級模擬輸出 (當無 API 金鑰或 API 呼叫失敗時) ===
+    add_log("Standard fallback routing triggered (Simulation Engine).")
+    
+    if "feasibility" in prompt.lower() or "regulatory roadmap" in prompt.lower():
+        return f"""### 📋 醫療器材法規可行性評估報告 (模擬生成)
+**當前運行模型**: {model} (Fallback Mode)
+**預期用途/適應症**: 軟體輔助診斷與臨床路徑追蹤。
+
+#### 技術與法規建議路徑：
+- 本器材被判定為 **Class II 醫療器材**，在台灣需符合 <span class='coral-highlight'>TFDA 技術查驗登記 STED</span> 之規範。
+- 軟體生命週期必須嚴格遵循 <span class='coral-highlight'>IEC 62304 Class B</span> 要求，落實原始碼安全檢測及追溯矩陣建立。
+- 風險管理策略需依據 <span class='coral-highlight'>ISO 14971:2019</span> 定期執行動態評估。
+"""
+    elif "checklist" in prompt.lower() or "tfda" in prompt.lower():
+        return f"""### 🔍 TFDA 查驗登記技術文件符合性分析 (模擬生成)
+**評估模型**: {model}
+
+1. **基本安全性能（EP Checklist）**：大部分條款已符合，惟缺少可用性評估佐證。
+2. **軟體驗證**：<span class='coral-highlight'>IEC 62304</span> 生命週期合規矩陣尚未完備。
+3. **生物相容性**：需補充與黏膜接觸組件之材料毒理學報告。
+"""
+    else:
+        return f"""### 🪄 AI 輔助合成報告 (模擬生成)
+**調用模型**: {model}
+**查證狀態**: 未連接 API（本地模擬）
+
+請於側邊欄配置您的 API 金鑰，系統將立即為您切換至 `{model}` 的即時線上推論。
+"""
 
     # FALLBACK INTELLECTUAL WORKSPACE RESPONSES (Grounded & high quality)
     add_log("Standard fallback routing triggered (Simulation Engine).")
