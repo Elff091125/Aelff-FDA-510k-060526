@@ -455,6 +455,30 @@ with st.sidebar:
     o_key = st.text_input(t("openai_key"), type="password", value=st.session_state.get("openai_key_val", ""))
     if o_key:
         st.session_state.openai_key_val = o_key
+
+
+    # Adding agents.yaml
+    st.markdown("---")
+    st.markdown(f"#### 🤖 {t('active_profile')}")
+    
+    # 1. 動態解析並取得當前 agents.yaml 的所有代理人名稱
+    available_agents = get_parsed_agents()
+    agent_names = [agent.get("name", "Unnamed Agent") for agent in available_agents]
+    
+    # 2. 提供下拉選單讓使用者切換當前執行任務的 Agent
+    if "selected_agent_name" not in st.session_state:
+        st.session_state.selected_agent_name = agent_names[0] if agent_names else ""
+        
+    chosen_agent_name = st.selectbox(
+        "Select Executive Agent", 
+        agent_names, 
+        index=agent_names.index(st.session_state.selected_agent_name) if st.session_state.selected_agent_name in agent_names else 0
+    )
+    
+    # 保存選取的 Agent 狀態
+    if chosen_agent_name != st.session_state.selected_agent_name:
+        st.session_state.selected_agent_name = chosen_agent_name
+        add_log(f"Switched executive agent persona to: {chosen_agent_name}")
     
     # Status markers for API keys
     key_found = "No key configured"
