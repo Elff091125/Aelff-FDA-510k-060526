@@ -212,6 +212,31 @@ def inject_custom_styles():
 # -----------------------------------------------------------------------------
 # 4. LLM ROUTING & FALLBACK GENERATOR
 # -----------------------------------------------------------------------------
+def get_parsed_agents():
+    """
+    安全解析工作區中的 agents.yaml，若語法錯誤則返回預設值。
+    """
+    default_agent = {
+        "name": "General Regulatory Specialist (通用法規專家)",
+        "role": "General medical device regulatory drafting and analysis.",
+        "skills": ["regulatory_compliance", "technical_writing"]
+    }
+    
+    # 確保 session state 中有 agents_yaml 變數
+    raw_yaml = st.session_state.get("agents_yaml", "")
+    if not raw_yaml.strip():
+        return [default_agent]
+        
+    try:
+        data = yaml.safe_load(raw_yaml)
+        if isinstance(data, dict) and "agents" in data:
+            return data["agents"]
+    except Exception as e:
+        # 僅記錄於 Log 中，不中斷使用者介面
+        add_log(f"YAML Parse Warning (Using fallback): {str(e)}")
+        
+    return [default_agent]
+
 def execute_llm_call(prompt, system_instruction="", model="gemini-3.1-flash-lite"):
     """
     動態調用現代 LLM 介面，並主動融合 agents.yaml 的角色設定與 skill.md 的行為限制。
