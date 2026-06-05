@@ -1,7 +1,6 @@
 streamlit
 openai
 anthropic
-google-generativeai
 pyyaml
 pandas
 numpy
@@ -14,3 +13,6 @@ PyPDF2
 tabulate
 plotly
 streamlit-agraph
+pyyaml
+openai
+google-genai>=2.4.0
