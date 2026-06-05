@@ -513,7 +513,7 @@ with tab_analyzer:
 
     st.markdown("#### Currently Active Context Memory")
     if st.session_state.active_context:
-        st.info(st.session_state.active_context[:800] + ("..." if len(st.session_state.active_context) > 800 else ""))
+        st.info(st.session_state.active_context[:4000] + ("..." if len(st.session_state.active_context) > 4000 else ""))
     else:
         st.caption("No context currently loaded into memory.")
 
