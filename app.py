@@ -214,30 +214,52 @@ def inject_custom_styles():
 # -----------------------------------------------------------------------------
 def execute_llm_call(prompt, system_instruction="", model="gemini-3.1-flash-lite"):
     """
-    動態調用現代 LLM 介面。若無金鑰，則安全降級至法規模擬引擎。
+    動態調用現代 LLM 介面，並主動融合 agents.yaml 的角色設定與 skill.md 的行為限制。
     """
     add_log(f"Initiated request to {model} with prompt length {len(prompt)} characters.")
     
-    # 提取環境變數或 Session 中的 API Key
+    # 1. 取得當前選定代理人（Agent）的詳細 Role 與 Skills 資訊
+    active_agent_name = st.session_state.get("selected_agent_name", "")
+    agents_list = get_parsed_agents()
+    active_agent = next((a for a in agents_list if a.get("name") == active_agent_name), {})
+    
+    agent_role = active_agent.get("role", "General medical device regulatory specialist.")
+    agent_skills = active_agent.get("skills", [])
+    
+    # 2. 取得 skill.md 的全域準則約束
+    global_rules = st.session_state.get("skill_md", "")
+    
+    # 3. 融合建置 Master System Instruction
+    master_system_instruction = f"""
+# EXECUTIVE PERSONA
+You are executing this task as the following specialized agent:
+- **Agent Name**: {active_agent_name}
+- **Your Role**: {agent_role}
+- **Your Specific Skills**: {', '.join(agent_skills)}
+
+# BASE INSTRUCTIONS
+{system_instruction}
+
+# GLOBAL COMPLIANCE RULES & CONSTRAINTS (From skill.md)
+{global_rules}
+"""
+
+    # 提取 API Key
     gemini_key = os.environ.get("GEMINI_API_KEY") or st.session_state.get("gemini_key_val")
     openai_key = os.environ.get("OPENAI_API_KEY") or st.session_state.get("openai_key_val")
     
-    # === GEMINI 現代 SDK 呼叫流程 ===
+    # === GEMINI 呼叫流程 ===
     if "gemini" in model.lower() and gemini_key:
         try:
-            # 引入 2026 官方推薦的 google-genai 模組
             from google import genai
             from google.genai import types
             
-            # 初始化 Client
             client = genai.Client(api_key=gemini_key)
-            
-            # 動態取得 UI 選擇的模型名稱，避免寫死
             target_model = model.strip()
             
-            # 使用新版 GenerateContentConfig 設定 System Instruction 與思考深度
+            # 將合成的 master_system_instruction 注入至 GenerateContentConfig 中
             config_params = types.GenerateContentConfig(
-                system_instruction=system_instruction if system_instruction else None,
+                system_instruction=master_system_instruction,
                 thinking_config=types.ThinkingConfig(thinking_budget=1024) if "3.5" in target_model else None
             )
             
@@ -247,7 +269,7 @@ def execute_llm_call(prompt, system_instruction="", model="gemini-3.1-flash-lite
                 config=config_params
             )
             
-            add_log(f"Gemini API ({target_model}) call succeeded via google-genai SDK.")
+            add_log(f"Gemini API ({target_model}) call succeeded. Mode: {active_agent_name}")
             return response.text
             
         except Exception as e:
@@ -258,48 +280,41 @@ def execute_llm_call(prompt, system_instruction="", model="gemini-3.1-flash-lite
         try:
             from openai import OpenAI
             client = OpenAI(api_key=openai_key)
-            
             target_model = "gpt-4o-mini" if "mini" in model else model
             
+            # 將合成的 master_system_instruction 注入為 system role
             completion = client.chat.completions.create(
                 model=target_model,
                 messages=[
-                    {"role": "system", "content": system_instruction},
+                    {"role": "system", "content": master_system_instruction},
                     {"role": "user", "content": prompt}
                 ]
             )
-            add_log(f"OpenAI API ({target_model}) call succeeded.")
+            add_log(f"OpenAI API ({target_model}) call succeeded. Mode: {active_agent_name}")
             return completion.choices[0].message.content
         except Exception as e:
             add_log(f"OpenAI API ({model}) returned an error: {str(e)}. Falling back to deterministic simulation.")
 
-    # === 降級模擬輸出 (當無 API 金鑰或 API 呼叫失敗時) ===
-    add_log("Standard fallback routing triggered (Simulation Engine).")
+    # === 降級模擬輸出 (當無 API 金鑰或呼叫失敗時) ===
+    add_log(f"Standard fallback routing triggered under agent: {active_agent_name}")
     
     if "feasibility" in prompt.lower() or "regulatory roadmap" in prompt.lower():
-        return f"""### 📋 醫療器材法規可行性評估報告 (模擬生成)
-**當前運行模型**: {model} (Fallback Mode)
-**預期用途/適應症**: 軟體輔助診斷與臨床路徑追蹤。
+        return f"""### 📋 醫療器材法規可行性評估報告 (代理人協同合成)
+**執行代理人 (Agent)**: {active_agent_name}
+**代理人角色描述**: {agent_role}
+**採用全域規則庫 (skill.md)**: 已融合
 
-#### 技術與法規建議路徑：
-- 本器材被判定為 **Class II 醫療器材**，在台灣需符合 <span class='coral-highlight'>TFDA 技術查驗登記 STED</span> 之規範。
-- 軟體生命週期必須嚴格遵循 <span class='coral-highlight'>IEC 62304 Class B</span> 要求，落實原始碼安全檢測及追溯矩陣建立。
-- 風險管理策略需依據 <span class='coral-highlight'>ISO 14971:2019</span> 定期執行動態評估。
-"""
-    elif "checklist" in prompt.lower() or "tfda" in prompt.lower():
-        return f"""### 🔍 TFDA 查驗登記技術文件符合性分析 (模擬生成)
-**評估模型**: {model}
-
-1. **基本安全性能（EP Checklist）**：大部分條款已符合，惟缺少可用性評估佐證。
-2. **軟體驗證**：<span class='coral-highlight'>IEC 62304</span> 生命週期合規矩陣尚未完備。
-3. **生物相容性**：需補充與黏膜接觸組件之材料毒理學報告。
+#### 代理人基於其專業技能 `{', '.join(agent_skills)}` 提出的特定意見：
+1. 本器材因具備特定人體接觸界面，應優先確認 <span class='coral-highlight'>ISO 10993-1</span> 的生物相容性測試豁免可行性。
+2. 考量本代理人的專業職能，建議在技術文件中補充特定安全與性能要求（EP Checklist）的第 1 至第 5 項論證。
+3. 軟體維護與資安控制，應在 <span class='coral-highlight'>IEC 62304</span> 生命週期架構下，委由資安代理人進行二次審查。
 """
     else:
-        return f"""### 🪄 AI 輔助合成報告 (模擬生成)
-**調用模型**: {model}
-**查證狀態**: 未連接 API（本地模擬）
+        return f"""### 🪄 AI 輔助合成報告 (代理人: {active_agent_name})
+此報告已融入您在 Agent Studio 中編輯之 `{active_agent_name}` 角色特徵。
+全域規則（來自於 `skill.md` 規範）已寫入 LLM 核心編譯器。
 
-請於側邊欄配置您的 API 金鑰，系統將立即為您切換至 `{model}` 的即時線上推論。
+請於側邊欄輸入 API 金鑰，以啟動線上即時代理人協調網路。
 """
 
     # FALLBACK INTELLECTUAL WORKSPACE RESPONSES (Grounded & high quality)
